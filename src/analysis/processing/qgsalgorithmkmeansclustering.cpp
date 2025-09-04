@@ -17,6 +17,7 @@
 
 #include "qgsalgorithmkmeansclustering.h"
 #include <unordered_map>
+#include "qgsspatialindex.h"
 #include <random>
 
 ///@cond PRIVATE
@@ -469,13 +470,15 @@ void QgsKMeansClusteringAlgorithm::calculateKMeans( std::vector<QgsKMeansCluster
   // avoid reallocating weights array for every iteration
   std::vector<uint> weights( k );
 
+  QgsSpatialIndex index;
   uint i = 0;
   for ( i = 0; i < KMEANS_MAX_ITERATIONS && !converged; i++ )
   {
     if ( feedback && feedback->isCanceled() )
       break;
 
-    findNearest( objs, centers, k, changed );
+    updateCenterSpatialIndex( centers, index );
+    findNearest( objs, changed, &index );
     updateMeans( objs, centers, weights, k );
     converged = !changed;
   }
@@ -488,34 +491,19 @@ void QgsKMeansClusteringAlgorithm::calculateKMeans( std::vector<QgsKMeansCluster
 
 // ported from https://github.com/postgis/postgis/blob/svn-trunk/liblwgeom/lwkmeans.c
 
-void QgsKMeansClusteringAlgorithm::findNearest( std::vector<QgsKMeansClusteringAlgorithm::Feature> &points, const std::vector<QgsPointXY> &centers, const int k, bool &changed )
+void QgsKMeansClusteringAlgorithm::findNearest( std::vector<QgsKMeansClusteringAlgorithm::Feature> &points, bool &changed, QgsSpatialIndex *centerIndex )
 {
   changed = false;
   const std::size_t n = points.size();
   for ( std::size_t i = 0; i < n; i++ )
   {
     Feature &point = points[i];
+    int closestCluster = centerIndex->nearestNeighbor( QgsGeometry::fromPointXY( point.point ), 1 ).first();
 
-    // Initialize with distance to first cluster
-    double currentDistance = point.point.sqrDist( centers[0] );
-    int currentCluster = 0;
-
-    // Check all other cluster centers and find the nearest
-    for ( int cluster = 1; cluster < k; cluster++ )
-    {
-      const double distance = point.point.sqrDist( centers[cluster] );
-      if ( distance < currentDistance )
-      {
-        currentDistance = distance;
-        currentCluster = cluster;
-      }
-    }
-
-    // Store the nearest cluster this object is in
-    if ( point.cluster != currentCluster )
+    if ( point.cluster != closestCluster )
     {
       changed = true;
-      point.cluster = currentCluster;
+      point.cluster = closestCluster;
     }
   }
 }
@@ -543,5 +531,14 @@ void QgsKMeansClusteringAlgorithm::updateMeans( const std::vector<Feature> &poin
   }
 }
 
+void QgsKMeansClusteringAlgorithm::updateCenterSpatialIndex( const std::vector<QgsPointXY> &centers, QgsSpatialIndex &index )
+{
+  index = QgsSpatialIndex();
+  for ( int i = 0; i < centers.size(); i++ )
+  {
+    QgsRectangle rect( centers[ i ], centers[ i ] );
+    index.addFeature( i, rect );
+  }
+}
 
 ///@endcond
