@@ -1253,6 +1253,8 @@ Deletes a vertex from a feature.
    changes can be discarded by calling :py:func:`~QgsVectorLayer.rollBack`.
 %End
 
+    Qgis::VectorEditResult deleteVertices( QgsFeatureId featureId, const QList<int> &vertices );
+
     bool deleteSelectedFeatures( int *deletedCount = 0, QgsVectorLayer::DeleteContext *context = 0 );
 %Docstring
 Deletes the selected features

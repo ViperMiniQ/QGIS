@@ -1275,6 +1275,8 @@ class CORE_EXPORT QgsVectorLayer : public QgsMapLayer, public QgsExpressionConte
      */
     Qgis::VectorEditResult deleteVertex( QgsFeatureId featureId, int vertex );
 
+    Qgis::VectorEditResult deleteVertices( QgsFeatureId featureId, const QList<int> &vertices );
+
     /**
      * Deletes the selected features
      * \param deletedCount The number of successfully deleted features
