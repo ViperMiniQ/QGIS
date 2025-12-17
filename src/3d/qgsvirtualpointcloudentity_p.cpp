@@ -248,6 +248,19 @@ void QgsVirtualPointCloudEntity::updateBboxEntity()
   mBboxesEntity->setBoxes( bboxes );
 }
 
+QgsVirtualPointCloudEntity::~QgsVirtualPointCloudEntity()
+{
+  // the commented out section does not work. It appears to work, but if the user changes
+  // symbology while the map is not finished updating (in other words, changes come too fast), it will crash
+  // that is really easy to achieve if someone uses a mouse scroll on a combobox, for example
+
+  // for ( auto chunk : mChunkedEntitiesMap )
+  // {
+  //   chunk->cancelActiveJobs();
+  // }
+  qDeleteAll( mChunkedEntitiesMap );
+}
+
 void QgsVirtualPointCloudEntity::setRenderSubIndexAsBbox( int i, bool asBbox )
 {
   if ( !mChunkedEntitiesMap.contains( i ) )
