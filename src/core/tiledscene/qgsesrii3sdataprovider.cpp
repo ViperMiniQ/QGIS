@@ -1142,7 +1142,7 @@ QList<QgsProviderSublayerDetails> QgsEsriI3SProviderMetadata::querySublayers( co
     parts.insert( u"path"_s, fileName );
 
     QgsProviderSublayerDetails details;
-    details.setUri( encodeUri( parts ) );
+    details.setUri( uri );
     details.setProviderKey( key() );
     details.setType( Qgis::LayerType::TiledScene );
     details.setName( QgsProviderUtils::suggestLayerNameFromFilePath( fileName ) );
