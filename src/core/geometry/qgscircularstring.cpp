@@ -663,18 +663,21 @@ void QgsCircularString::deleteVertex( int i )
   clearCache();
 }
 
-bool QgsCircularString::deleteVertices( const QSet<QgsVertexId> &positions )
+bool QgsCircularString::deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices )
 {
   if ( positions.empty() )
   {
     return false;
   }
 
-  for ( QgsVertexId pos : positions )
+  if ( verifyVertices )
   {
-    if ( !hasVertex( pos ) )
+    for ( QgsVertexId pos : positions )
     {
-      return false;
+      if ( !hasVertex( pos ) )
+      {
+        return false;
+      }
     }
   }
 

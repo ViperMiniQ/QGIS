@@ -550,11 +550,12 @@ class CORE_EXPORT QgsAbstractGeometry
      * If \a positions contains vertices not belonging to the geometry, FALSE is returned and the geometry is not modified.
      * If a vertex cannot be deleted, the method returns FALSE and the geometry may be left in a partially modified and invalid state.
      * \param positions set of vertex ids to delete
+     * \param verifyVertices if TRUE, verifies that the given vertex ids belong to the geometry prior to attempting their deletion (since QGIS 4.4)
      * \returns TRUE if all requested vertices were deleted, FALSE if at least one vertex could not be deleted
      * \see deleteVertex
      * \since QGIS 4.2
      */
-    virtual bool deleteVertices( const QSet<QgsVertexId> &positions ) = 0;
+    virtual bool deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices = true ) = 0;
 
     /**
      * Returns TRUE if the geometry contains a vertex matching the given \a position.

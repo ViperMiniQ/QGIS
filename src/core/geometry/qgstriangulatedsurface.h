@@ -122,7 +122,7 @@ class CORE_EXPORT QgsTriangulatedSurface : public QgsPolyhedralSurface
 
     bool insertVertex( QgsVertexId position, const QgsPoint &vertex ) override;
     bool deleteVertex( QgsVertexId position ) override;
-    bool deleteVertices( const QSet<QgsVertexId> &positions ) override;
+    bool deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices = true ) override;
 
     /**
      * Sets all triangles, transferring ownership to the polyhedral surface.

@@ -532,7 +532,7 @@ Deletes a vertex within the geometry
 .. seealso:: :py:func:`moveVertex`
 %End
 
-    virtual bool deleteVertices( const QSet<QgsVertexId> &positions ) = 0;
+    virtual bool deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices = true ) = 0;
 %Docstring
 Deletes vertices within the geometry. If ``positions`` contains vertices
 not belonging to the geometry, ``False`` is returned and the geometry is
@@ -541,6 +541,9 @@ not modified. If a vertex cannot be deleted, the method returns
 invalid state.
 
 :param positions: set of vertex ids to delete
+:param verifyVertices: if ``True``, verifies that the given vertex ids
+                       belong to the geometry prior to attempting their
+                       deletion (since QGIS 4.4)
 
 :return: ``True`` if all requested vertices were deleted, ``False`` if
          at least one vertex could not be deleted

@@ -262,9 +262,10 @@ bool QgsTriangle::deleteVertex( QgsVertexId position )
   return false;
 }
 
-bool QgsTriangle::deleteVertices( const QSet<QgsVertexId> &positions )
+bool QgsTriangle::deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices )
 {
   Q_UNUSED( positions )
+  Q_UNUSED( verifyVertices )
   return false;
 }
 

@@ -231,7 +231,7 @@ n-1 condition).
 
     virtual bool deleteVertex( QgsVertexId position );
 
-    virtual bool deleteVertices( const QSet<QgsVertexId> &positions );
+    virtual bool deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices = true );
 
     virtual bool fromWkb( QgsConstWkbPtr &wkb );
 

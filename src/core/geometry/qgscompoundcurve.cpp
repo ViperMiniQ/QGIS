@@ -941,13 +941,13 @@ bool QgsCompoundCurve::deleteVertex( QgsVertexId position )
   return success;
 }
 
-bool QgsCompoundCurve::deleteVertices( const QSet<QgsVertexId> &positions )
+bool QgsCompoundCurve::deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices )
 {
   // we create a list of vertices to delete for each curve
   QMap<int, QList<QgsVertexId >> curveVertices;
   for ( QgsVertexId position : positions )
   {
-    if ( !hasVertex( position ) )
+    if ( verifyVertices && !hasVertex( position ) )
     {
       return false;
     }
@@ -1020,7 +1020,7 @@ bool QgsCompoundCurve::deleteVertices( const QSet<QgsVertexId> &positions )
           // first we delete all the vertices that come before it in this circularstring
           if ( !circularVerticesToDelete.isEmpty() )
           {
-            if ( !curve->deleteVertices( QSet<QgsVertexId>( circularVerticesToDelete.begin(), circularVerticesToDelete.end() ) ) )
+            if ( !curve->deleteVertices( QSet<QgsVertexId>( circularVerticesToDelete.begin(), circularVerticesToDelete.end() ), false ) )
             {
               Q_ASSERT( false ); // shouldn't happen after all the checks
               return false;
@@ -1066,7 +1066,7 @@ bool QgsCompoundCurve::deleteVertices( const QSet<QgsVertexId> &positions )
       // remove any remaining circular vertices to delete
       if ( !circularVerticesToDelete.isEmpty() )
       {
-        if ( !curve->deleteVertices( QSet<QgsVertexId>( circularVerticesToDelete.begin(), circularVerticesToDelete.end() ) ) )
+        if ( !curve->deleteVertices( QSet<QgsVertexId>( circularVerticesToDelete.begin(), circularVerticesToDelete.end() ), false ) )
         {
           Q_ASSERT( false );
           return false;
@@ -1075,7 +1075,7 @@ bool QgsCompoundCurve::deleteVertices( const QSet<QgsVertexId> &positions )
       continue; // circularstring handled, continue to next curve
     }
 
-    if ( !curve->deleteVertices( QSet<QgsVertexId>( vertices.begin(), vertices.end() ) ) )
+    if ( !curve->deleteVertices( QSet<QgsVertexId>( vertices.begin(), vertices.end() ), false ) )
     {
       Q_ASSERT( false );
       return false;

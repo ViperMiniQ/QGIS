@@ -679,12 +679,12 @@ bool QgsGeometryCollection::deleteVertex( QgsVertexId position )
   return success;
 }
 
-bool QgsGeometryCollection::deleteVertices( const QSet<QgsVertexId> &positions )
+bool QgsGeometryCollection::deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices )
 {
   QMap<int, QSet<QgsVertexId>> partVertices;
   for ( QgsVertexId pos : positions )
   {
-    if ( !hasVertex( pos ) )
+    if ( verifyVertices && !hasVertex( pos ) )
       return false;
 
     partVertices[pos.part].insert( QgsVertexId( 0, pos.ring, pos.vertex ) );
@@ -706,7 +706,7 @@ bool QgsGeometryCollection::deleteVertices( const QSet<QgsVertexId> &positions )
     }
 
     // quit if any vertex on any part fails to be deleted
-    if ( !geom->deleteVertices( partVertices ) )
+    if ( !geom->deleteVertices( partVertices, false ) )
     {
       Q_ASSERT( false );
       return false;

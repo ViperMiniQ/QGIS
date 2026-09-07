@@ -109,7 +109,7 @@ class CORE_EXPORT QgsCircularString : public QgsSimpleCurve
     void drawAsPolygon( QPainter &p ) const override;
     bool insertVertex( QgsVertexId position, const QgsPoint &vertex ) override;
     bool deleteVertex( QgsVertexId position ) override;
-    bool deleteVertices( const QSet<QgsVertexId> &positions ) override;
+    bool deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices = true ) override;
     double closestSegment( const QgsPoint &pt, QgsPoint &segmentPt SIP_OUT, QgsVertexId &vertexAfter SIP_OUT, int *leftOf SIP_OUT = nullptr, double epsilon = 4 * std::numeric_limits<double>::epsilon() ) const override;
     bool pointAt( int node, QgsPoint &point, Qgis::VertexType &type ) const override;
     void sumUpArea( double &sum SIP_OUT ) const override;

@@ -660,18 +660,21 @@ bool QgsNurbsCurve::deleteVertex( QgsVertexId position )
   return true;
 }
 
-bool QgsNurbsCurve::deleteVertices( const QSet<QgsVertexId> &positions )
+bool QgsNurbsCurve::deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices )
 {
   if ( positions.isEmpty() )
   {
     return false;
   }
 
-  for ( QgsVertexId pos : positions )
+  if ( verifyVertices )
   {
-    if ( !hasVertex( pos ) )
+    for ( QgsVertexId pos : positions )
     {
-      return false;
+      if ( !hasVertex( pos ) )
+      {
+        return false;
+      }
     }
   }
 

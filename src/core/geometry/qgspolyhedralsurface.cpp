@@ -761,12 +761,12 @@ bool QgsPolyhedralSurface::deleteVertex( QgsVertexId vId )
   return success;
 }
 
-bool QgsPolyhedralSurface::deleteVertices( const QSet<QgsVertexId> &positions )
+bool QgsPolyhedralSurface::deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices )
 {
   QMap<int, QSet<QgsVertexId>> partVertices;
   for ( QgsVertexId pos : positions )
   {
-    if ( !hasVertex( pos ) )
+    if ( verifyVertices && !hasVertex( pos ) )
     {
       return false;
     }
@@ -784,7 +784,7 @@ bool QgsPolyhedralSurface::deleteVertices( const QSet<QgsVertexId> &positions )
     QSet<QgsVertexId> vertexMap = partVerticesIt.value();
     QgsPolygon *patch = mPatches.at( part );
 
-    if ( !patch->deleteVertices( vertexMap ) )
+    if ( !patch->deleteVertices( vertexMap, false ) )
     {
       Q_ASSERT( false );
       return false;

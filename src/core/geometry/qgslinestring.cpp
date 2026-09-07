@@ -1570,7 +1570,7 @@ bool QgsLineString::deleteVertex( QgsVertexId position )
   return true;
 }
 
-bool QgsLineString::deleteVertices( const QSet<QgsVertexId> &positions )
+bool QgsLineString::deleteVertices( const QSet<QgsVertexId> &positions, bool verifyVertices )
 {
   if ( positions.isEmpty() )
   {
@@ -1579,11 +1579,14 @@ bool QgsLineString::deleteVertices( const QSet<QgsVertexId> &positions )
 
   QList<QgsVertexId> vertices( positions.begin(), positions.end() );
 
-  for ( QgsVertexId pos : positions )
+  if ( verifyVertices )
   {
-    if ( !hasVertex( pos ) )
+    for ( QgsVertexId pos : positions )
     {
-      return false;
+      if ( !hasVertex( pos ) )
+      {
+        return false;
+      }
     }
   }
 
