@@ -25,6 +25,10 @@ class QgsMultiPolygon;
 class QgsLineString;
 
 #include <QVector>
+#include <QVector4D>
+#include <QtMath>
+#include <array>
+#include <functional>
 #include <memory>
 
 /**
@@ -106,6 +110,29 @@ class CORE_EXPORT QgsTessellator
      * \since QGIS 4.0
      */
     Qgis::ExtrusionFaces extrusionFaces() const { return mExtrusionFaces; }
+
+    /**
+     * Sets the ellipsoid of the globe that polygons are being tessellated onto, switching the
+     * tessellator into globe (geocentric) mode. Set \a semiMajorAxis to 0 (the default) for flat
+     * scenes.
+     *
+     * In globe mode input coordinates are treated as geocentric (ECEF) positions, and:
+     *
+     * - the triangles a polygon is tessellated into are recursively subdivided until they follow
+     *   the curvature of the globe, instead of cutting through it on the single flat plane the
+     *   polygon was triangulated in
+     * - vertex normals are the outward ellipsoid normal at each vertex, rather than the normal of
+     *   that flat plane
+     * - extrusion height is applied along those outward normals instead of along the world Z axis,
+     *   which is only a meaningful "up" direction for flat scenes, so extruded walls lean outwards
+     *
+     * \note Only the triangles are subdivided, so the walls of an extruded polygon still follow the
+     * straight chords between the input ring's vertices. They meet the roof at those vertices, but
+     * a ring segment spanning a large angle will leave the roof bulging out above its wall.
+     *
+     * \since QGIS 4.3
+     */
+    void setGlobeEllipsoid( double semiMajorAxis, double semiMinorAxis );
 
     /**
      * Sets the rotation of texture UV coordinates (in degrees).
@@ -303,17 +330,49 @@ class CORE_EXPORT QgsTessellator
         inline bool operator==( const VertexPoint &other ) const { return position == other.position && normal == other.normal && tangent == other.tangent; }
     };
 
-    friend size_t qHash( const VertexPoint &key, size_t seed )
-    {
-      return qHashMulti( seed, key.position.x(), key.position.y(), key.position.z(), key.normal.x(), key.normal.y(), key.normal.z(), key.tangent.x(), key.tangent.y(), key.tangent.z(), key.tangent.w() );
-    }
+    //! Receives a triangle's three corners along with the surface normal at each of them
+    using TriangleEmitter = std::function<void( const std::array<QVector3D, 3> &points, const std::array<QVector3D, 3> &normals )>;
+
+    friend size_t qHash( const VertexPoint &key, size_t seed ) { return qHashMulti( seed, key.position.x(), key.position.y(), key.position.z() ); }
 
     QVector<uint32_t> mIndexBuffer;
 
     void updateStride();
     void setExtrusionFacesLegacy( int facade );
     void calculateBaseTransform( const QVector3D &pNormal, QMatrix4x4 *base ) const;
-    QVector3D applyTransformWithExtrusion( const QVector3D point, float extrusionHeight, QMatrix4x4 *transformMatrix, const QgsPoint *originOffset );
+    QVector3D applyTransformWithExtrusion( const QVector3D point, const QVector3D &normal, float extrusionHeight, QMatrix4x4 *transformMatrix, const QgsPoint *originOffset );
+
+    //! Returns TRUE if polygons are being tessellated onto a globe, in geocentric coordinates
+    bool isGlobe() const { return mGlobeSemiMajorAxis > 0 && !mInputZValueIgnored; }
+    /**
+     * Returns how far \a p sits from the globe's centre, as a multiple of the ellipsoid's own radius
+     * in that same direction: 1 for a point exactly on the ellipsoid, 2 for one twice as far out.
+     * Dividing a point by this value therefore drops it onto the ellipsoid surface, along the ray
+     * from the geocentre.
+     */
+    double globeSurfaceRatio( const QgsVector3D &p ) const;
+
+    /**
+     * Subdivides the flat triangles of \a trianglePoints (in triangulation base space) into ones
+     * small enough to follow the globe's curvature, and hands each of them, together with the globe
+     * normal at each of its three corners, to \a emitTriangle. The corners passed to the callback
+     * are already in world space, relative to \a baseOrigin, so they need no further transform.
+     */
+    void subdivideTrianglesForGlobe( const std::vector<QVector3D> &trianglePoints, const QMatrix4x4 &baseToWorld, const QgsPoint &baseOrigin, const TriangleEmitter &emitTriangle );
+
+    /**
+     * Writes the roof and floor faces of a single triangle, with a \a normals entry per corner, to
+     * the output buffers, including the back faces of each if mAddBackFaces is set. Which of the two
+     * faces are written, and how far the roof is extruded, come from mBuildRoof, mBuildFloor and
+     * mExtrusionHeight, all set by addPolygon() for the polygon being processed.
+     *
+     * If \a vertexBuffer is NULLPTR the corners are appended without any vertex sharing, otherwise
+     * vertices already present in it are reused, with \a vertexBufferOffset being the index its
+     * first vertex was written at.
+     */
+    void addTriangle(
+      const std::array<QVector3D, 3> &points, const std::array<QVector3D, 3> &normals, QMatrix4x4 *transformMatrix, const QgsPoint *originOffset, QHash<VertexPoint, unsigned int> *vertexBuffer, size_t vertexBufferOffset
+    );
     void addVertex(
       const QVector3D &point,
       const QVector3D &normal,
@@ -327,7 +386,7 @@ class CORE_EXPORT QgsTessellator
     );
     void addVertex( const QVector3D &point, const QVector3D &normal, const QVector4D &tangent, float extrusionHeight, QMatrix4x4 *transformMatrix, const QgsPoint *originOffset, bool isFloor = false );
     void makeWalls( const QgsLineString &ring, bool ccw, float extrusionHeight );
-    void addExtrusionWallQuad( const QVector3D &pt1, const QVector3D &pt2, float height, float u1, float u2 );
+    void addExtrusionWallQuad( const QVector3D &pt1, const QVector3D &pt2, float height, float u1, float u2, const QVector3D &normal1, const QVector3D &normal2 );
     std::vector<QVector3D> generateConstrainedDelaunayTriangles( const QgsPolygon *polygonNew );
     std::vector<QVector3D> generateEarcutTriangles( const QgsPolygon *polygonNew );
 
@@ -341,12 +400,28 @@ class CORE_EXPORT QgsTessellator
     int mStride = 3 * sizeof( float );
     bool mInputZValueIgnored = false;
     Qgis::ExtrusionFaces mExtrusionFaces = Qgis::ExtrusionFace::Walls | Qgis::ExtrusionFace::Roof;
+    double mGlobeSemiMajorAxis = 0;
+    double mGlobeSemiMinorAxis = 0;
     Qgis::TriangulationAlgorithm mTriangulationAlgorithm = Qgis::TriangulationAlgorithm::ConstrainedDelaunay;
     float mScale = 1.0f;
     QString mError;
 
+    // set by addPolygon() for the polygon it is working on, and read by addTriangle()
+    float mExtrusionHeight = 0;
+    bool mBuildRoof = false;
+    bool mBuildFloor = false;
+
     float mZMin = std::numeric_limits<float>::max();
     float mZMax = -std::numeric_limits<float>::max();
+
+    // one degree of angular resolution when splitting a triangle across the globe
+    double mGlobeSubdivisionGranularity = M_PI / 180.0;
+
+    // tangents of the flat roof and floor faces, and of the back face of each
+    QVector4D mRoofTangent { 1.0f, 0.0f, 0.0f, 1.0f };
+    QVector4D mRoofBackTangent { 1.0f, 0.0f, 0.0f, -1.0f };
+    QVector4D mFloorTangent { -1.0f, 0.0f, 0.0f, 1.0f };
+    QVector4D mFloorBackTangent { -1.0f, 0.0f, 0.0f, -1.0f };
 };
 
 

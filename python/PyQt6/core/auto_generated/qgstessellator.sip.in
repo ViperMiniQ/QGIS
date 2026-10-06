@@ -111,6 +111,33 @@ Returns which faces are generated during extrusion.
 .. versionadded:: 4.0
 %End
 
+    void setGlobeEllipsoid( double semiMajorAxis, double semiMinorAxis );
+%Docstring
+Sets the ellipsoid of the globe that polygons are being tessellated
+onto, switching the tessellator into globe (geocentric) mode. Set
+``semiMajorAxis`` to 0 (the default) for flat scenes.
+
+In globe mode input coordinates are treated as geocentric (ECEF)
+positions, and:
+
+- the triangles a polygon is tessellated into are recursively subdivided
+  until they follow the curvature of the globe, instead of cutting
+  through it on the single flat plane the polygon was triangulated in
+- vertex normals are the outward ellipsoid normal at each vertex, rather
+  than the normal of that flat plane
+- extrusion height is applied along those outward normals instead of
+  along the world Z axis, which is only a meaningful "up" direction for
+  flat scenes, so extruded walls lean outwards
+
+.. note::
+
+   Only the triangles are subdivided, so the walls of an extruded polygon still follow the
+   straight chords between the input ring's vertices. They meet the roof at those vertices, but
+   a ring segment spanning a large angle will leave the roof bulging out above its wall.
+
+.. versionadded:: 4.3
+%End
+
  void setTextureRotation( float rotation ) /Deprecated="Since 4.2. Handled in shaders now. No longer has any effect on the texture coordinates."/;
 %Docstring
 Sets the rotation of texture UV coordinates (in degrees).

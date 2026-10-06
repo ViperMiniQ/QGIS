@@ -108,10 +108,12 @@ class QgsFeature3DHandler
     void updateZRangeFromPositions( const QVector<QVector3D> &positions );
 
     /**
-     * Clips \a geom to the chunk extents if it is larger than MAX_GEOM_BBOX_SIZE
+     * Clips \a geom to the chunk extents if it is larger than MAX_GEOM_BBOX_SIZE.
+     * Never clips in globe scenes: the chunk extent's XY rectangle is not a real region
+     * on the ellipsoid, and GEOS 2D clipping produces vertices that drift off the surface.
      * Return TRUE if \a geom was clipped, FALSE otherwise
      */
-    bool clipGeometryIfTooLarge( QgsGeometry &geom ) const;
+    bool clipGeometryIfTooLarge( QgsGeometry &geom, const Qgs3DRenderContext &context ) const;
 
   protected:
     float mZMin = std::numeric_limits<float>::max();

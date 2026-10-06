@@ -88,17 +88,17 @@ void QgsVectorLayerChunkLoader::start()
   req.setSubsetOfAttributes( attributeNames, layer->fields() );
 
   QgsCoordinateTransform layerToRenderCrs;
+  QgsRectangle extent;
   if ( mFactory->mIsGeocentric )
   {
     layerToRenderCrs = QgsCoordinateTransform( layer->crs3D(), mRenderContext.crs(), mRenderContext.transformContext() );
     layerToRenderCrs.setBallparkTransformsAreAppropriate( true );
 
-    QgsRectangle filterRect;
     if ( layer->crs().type() == Qgis::CrsType::Geocentric )
     {
       try
       {
-        filterRect = layerToRenderCrs.transformBox3D( node->box3D(), Qgis::TransformDirection::Reverse ).toRectangle();
+        extent = layerToRenderCrs.transformBox3D( node->box3D(), Qgis::TransformDirection::Reverse ).toRectangle();
       }
       catch ( const QgsCsException & )
       {
@@ -108,9 +108,9 @@ void QgsVectorLayerChunkLoader::start()
     else
     {
       const QgsRectangle lonLatRect = QgsGlobeUtils::nodeIdToLonLatRect( node->tileId() );
-      filterRect = Qgs3DUtils::tryReprojectExtent2D( lonLatRect, mFactory->mCrsToLatLon.destinationCrs(), layer->crs(), mRenderContext.transformContext() );
+      extent = Qgs3DUtils::tryReprojectExtent2D( lonLatRect, mFactory->mCrsToLatLon.destinationCrs(), layer->crs(), mRenderContext.transformContext() );
     }
-    req.setFilterRect( filterRect );
+    req.setFilterRect( extent );
   }
   else
   {
@@ -131,7 +131,7 @@ void QgsVectorLayerChunkLoader::start()
   connect( mFutureWatcher, &QFutureWatcher<void>::finished, this, &QgsChunkQueueJob::finished );
 
   const bool isGeocentric = mFactory->mIsGeocentric;
-  const QFuture<void> future = QtConcurrent::run( [req = std::move( req ), layerToRenderCrs, isGeocentric, this] {
+  const QFuture<void> future = QtConcurrent::run( [req = std::move( req ), layerToRenderCrs, isGeocentric, extent, this] {
     const QgsScopedEvent e( u"3D"_s, u"VL chunk load"_s );
 
     QgsFeature f;
@@ -151,7 +151,10 @@ void QgsVectorLayerChunkLoader::start()
 
       if ( isGeocentric )
       {
-        QgsGeometry g = f.geometry();
+        QgsGeometry g = f.geometry().clipped( extent );
+        if ( g.isEmpty() )
+          continue;
+
         if ( !g.constGet()->is3D() )
           g.get()->addZValue( 0 );
 
@@ -238,11 +241,16 @@ QgsVectorLayerChunkLoaderFactory::QgsVectorLayerChunkLoaderFactory( const Qgs3DR
 {
   if ( context.crs().type() == Qgis::CrsType::Geocentric )
   {
-    // TODO: add support for handling of vector layers (other than points)
-    if ( QgsWkbTypes::geometryType( mLayer->wkbType() ) != Qgis::GeometryType::Point )
+    const Qgis::GeometryType geometryType = QgsWkbTypes::geometryType( mLayer->wkbType() );
+
+    // simple lines go straight to a geometry shader and skip the tessellator, so they don't get
+    // the geodesic subdivision + ellipsoid-normal extrusion that keeps buffered lines on the globe
+    const QgsLine3DSymbol *lineSymbol = dynamic_cast<const QgsLine3DSymbol *>( mSymbol.get() );
+    const bool isUnsupportedSimpleLine = lineSymbol && lineSymbol->renderAsSimpleLines();
+    if ( ( geometryType != Qgis::GeometryType::Point && geometryType != Qgis::GeometryType::Polygon && geometryType != Qgis::GeometryType::Line ) || isUnsupportedSimpleLine )
     {
       // (we're using dummy quadtree here to make sure the empty extent does not break the scene completely)
-      QgsDebugError( u"Non-point vector layers in globe scenes are not supported yet!"_s );
+      QgsDebugError( u"Simple line vector layers in globe scenes are not supported yet!"_s );
       setupQuadtree( QgsBox3D( -7e6, -7e6, -7e6, 7e6, 7e6, 7e6 ), -1, 3 );
       return;
     }

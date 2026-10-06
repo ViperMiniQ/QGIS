@@ -14,6 +14,7 @@
  ***************************************************************************/
 
 #include "qgsgeometry.h"
+#include "qgslinestring.h"
 #include "qgslogger.h"
 #include "qgsmultipolygon.h"
 #include "qgspolygon.h"
@@ -272,6 +273,8 @@ class TestQgsTessellator : public QgsTest
     void testDuplicatePoints();
     void testRoofs();
     void testFloorsAndRoofs();
+    void testGlobeSubdivision();
+    void testGlobeExtrusion();
 
   private:
 };
@@ -1428,6 +1431,183 @@ void TestQgsTessellator::testFloorsAndRoofs()
 
     QVERIFY( checkTriangleOutput( extractTriangles( t, false ), tc ) );
   }
+}
+
+constexpr double WGS84_A = 6378137.0;
+constexpr double WGS84_F = 1.0 / 298.257223563;
+constexpr double WGS84_B = WGS84_A * ( 1 - WGS84_F );
+//! Kept in step with QgsTessellator's own subdivision granularity
+constexpr double GLOBE_GRANULARITY = M_PI / 180.0;
+
+//! lon/lat (degrees) on the ellipsoid surface -> geocentric (ECEF) metres
+static QgsPoint toEcef( double lon, double lat )
+{
+  const double eSq = WGS84_F * ( 2 - WGS84_F );
+  const double latRad = lat * M_PI / 180.0;
+  const double lonRad = lon * M_PI / 180.0;
+  const double n = WGS84_A / std::sqrt( 1 - eSq * std::sin( latRad ) * std::sin( latRad ) );
+  return QgsPoint( Qgis::WkbType::PointZ, n * std::cos( latRad ) * std::cos( lonRad ), n * std::cos( latRad ) * std::sin( lonRad ), n * ( 1 - eSq ) * std::sin( latRad ) );
+}
+
+/**
+ * How far \a p sits above (positive) or below (negative) the ellipsoid surface, measured
+ * along the ray from the geocentre.
+ */
+static double heightAboveSurface( const QVector3D &p )
+{
+  const double x = p.x(), y = p.y(), z = p.z();
+  const double ratio = std::sqrt( ( x * x + y * y ) / ( WGS84_A * WGS84_A ) + z * z / ( WGS84_B * WGS84_B ) );
+  const double length = std::sqrt( x * x + y * y + z * z );
+  return ratio > 0 ? length * ( 1 - 1 / ratio ) : 0;
+}
+
+//! A 40 x 40 degree square straddling the equator, in geocentric (ECEF) metres
+static QgsPolygon bigGlobePolygon()
+{
+  const QVector<QgsPoint> corners { toEcef( -20, 20 ), toEcef( 20, 20 ), toEcef( 20, -20 ), toEcef( -20, -20 ), toEcef( -20, 20 ) };
+  QgsPolygon polygon;
+  polygon.setExteriorRing( new QgsLineString( corners ) );
+  return polygon;
+}
+
+void TestQgsTessellator::testGlobeSubdivision()
+{
+  // a 40 x 40 degree square straddling the equator -- its edges are ~4400 km long, so a flat
+  // triangulation of it cuts hundreds of km down through the globe
+  const QgsPolygon polygon = bigGlobePolygon();
+
+  // without globe mode the polygon stays flat, so its vertices are the only points on the surface
+  {
+    QgsTessellator t;
+    t.setTriangulationAlgorithm( Qgis::TriangulationAlgorithm::Earcut );
+    t.addPolygon( polygon, 0 );
+
+    const QList<TriangleCoords> triangles = extractTriangles( t, false );
+    QCOMPARE( triangles.size(), 2 );
+  }
+
+  // with globe mode the triangles get subdivided until they follow the curvature
+  QgsTessellator t;
+  t.setAddNormals( true );
+  t.setTriangulationAlgorithm( Qgis::TriangulationAlgorithm::Earcut );
+  t.setGlobeEllipsoid( WGS84_A, WGS84_B );
+  t.addPolygon( polygon, 0 );
+  QVERIFY( t.error().isEmpty() );
+
+  const QList<TriangleCoords> triangles = extractTriangles( t, true );
+  QVERIFY( triangles.size() > 1000 );
+
+  // an edge is allowed to span at most the granularity angle, which on a globe of this size is a
+  // chord of ~111 km. Allow some slack: the criterion is evaluated on a sphere of radius a, while
+  // the edges themselves are measured on the (slightly smaller towards the poles) ellipsoid.
+  const double maxEdgeLength = 2.0 * WGS84_A * std::sin( GLOBE_GRANULARITY * 0.5 ) * 1.1;
+
+  double worstHeight = 0;
+  double longestEdge = 0;
+  for ( const TriangleCoords &triangle : triangles )
+  {
+    for ( int i = 0; i < 3; ++i )
+    {
+      worstHeight = std::max( worstHeight, std::fabs( heightAboveSurface( triangle.pts[i] ) ) );
+      longestEdge = std::max( longestEdge, static_cast<double>( triangle.pts[i].distanceToPoint( triangle.pts[( i + 1 ) % 3] ) ) );
+
+      // normals must face away from the globe's centre, whatever the ring's winding order
+      QVERIFY( QVector3D::dotProduct( triangle.normals[i], triangle.pts[i] ) > 0 );
+      QGSCOMPARENEAR( triangle.normals[i].length(), 1.0f, 0.001f );
+    }
+  }
+
+  // every vertex sits on the ellipsoid -- the tolerance only has to absorb the float vertex
+  // buffer, which quantises geocentric coordinates to ~0.5 m (measured worst case: 0.37 m). A
+  // triangle left flat at the granularity limit would sag ~240 m, so this has plenty of margin.
+  QVERIFY2( worstHeight < 2, u"worst vertex is %1 m off the ellipsoid"_s.arg( worstHeight ).toUtf8().constData() );
+  QVERIFY2( longestEdge < maxEdgeLength, u"longest edge is %1 m, limit %2 m"_s.arg( longestEdge ).arg( maxEdgeLength ).toUtf8().constData() );
+}
+
+void TestQgsTessellator::testGlobeExtrusion()
+{
+  // extruding on a globe has to push the geometry away from the globe's centre rather than along
+  // the world Z axis, so that the walls stay upright and their tops meet the roof
+  constexpr float EXTRUSION = 200000.0f;
+
+  const QgsPolygon polygon = bigGlobePolygon();
+
+  QgsTessellator t;
+  t.setAddNormals( true );
+  t.setTriangulationAlgorithm( Qgis::TriangulationAlgorithm::Earcut );
+  t.setExtrusionFaces( Qgis::ExtrusionFace::Walls | Qgis::ExtrusionFace::Roof | Qgis::ExtrusionFace::Floor );
+  t.setGlobeEllipsoid( WGS84_A, WGS84_B );
+  t.addPolygon( polygon, EXTRUSION );
+  QVERIFY( t.error().isEmpty() );
+
+  const QList<TriangleCoords> triangles = extractTriangles( t, true );
+  QVERIFY( !triangles.isEmpty() );
+
+  // the vertex buffer quantises geocentric coordinates to ~0.5 m, and the walls and the roof reach
+  // their shared top edge by different routes, so nothing here can be compared exactly
+  constexpr double TOLERANCE = 2;
+
+  // every vertex belongs either to the floor, sitting on the ellipsoid, or to the roof / the top of
+  // a wall, at the full extrusion height above it. A wall lifted along the world Z axis -- or along
+  // one normal for the whole quad -- would land its top short of the height, and off to one side.
+  QList<QVector3D> roofVertices;
+  QList<QVector3D> wallTopVertices;
+
+  for ( const TriangleCoords &triangle : triangles )
+  {
+    int atRoofHeight = 0;
+    for ( int i = 0; i < 3; ++i )
+    {
+      const double height = heightAboveSurface( triangle.pts[i] );
+      const bool onSurface = std::fabs( height ) < TOLERANCE;
+      const bool atRoof = std::fabs( height - EXTRUSION ) < TOLERANCE;
+      QVERIFY2( onSurface || atRoof, u"vertex is %1 m above the ellipsoid, expected 0 or %2"_s.arg( height ).arg( EXTRUSION ).toUtf8().constData() );
+      if ( atRoof )
+        ++atRoofHeight;
+    }
+
+    if ( atRoofHeight == 3 )
+    {
+      for ( int i = 0; i < 3; ++i )
+        roofVertices.append( triangle.pts[i] );
+      continue;
+    }
+    if ( atRoofHeight == 0 )
+      continue;
+
+    // a triangle with vertices at both heights is part of a wall
+
+    for ( int i = 0; i < 3; ++i )
+    {
+      if ( std::fabs( heightAboveSurface( triangle.pts[i] ) - EXTRUSION ) < TOLERANCE )
+        wallTopVertices.append( triangle.pts[i] );
+    }
+
+    // the wall faces sideways, so its normal is perpendicular to the direction outwards from the
+    // globe's centre. The flat-scene normal of [-dy, dx, 0] would be ~0.94 off at these latitudes.
+    for ( int i = 0; i < 3; ++i )
+    {
+      const QVector3D up = triangle.pts[i].normalized();
+      QGSCOMPARENEAR( triangle.normals[i].length(), 1.0f, 0.001f );
+      QGSCOMPARENEAR( QVector3D::dotProduct( triangle.normals[i], up ), 0.0f, 0.02f );
+    }
+  }
+
+  QVERIFY( !roofVertices.isEmpty() );
+  QVERIFY( !wallTopVertices.isEmpty() );
+
+  // only the triangles get subdivided, so a wall's own edges are still the input ring's straight
+  // chords -- but its corners are input ring vertices, which survive subdivision untouched, so
+  // every wall top still has to land on a roof vertex
+  double worstSeamGap = 0;
+  for ( const QVector3D &wallTop : wallTopVertices )
+  {
+    double nearest = std::numeric_limits<double>::max();
+    for ( const QVector3D &roof : roofVertices )
+      nearest = std::min( nearest, static_cast<double>( wallTop.distanceToPoint( roof ) ) );
+    worstSeamGap = std::max( worstSeamGap, nearest );
+  }
+  QVERIFY2( worstSeamGap < TOLERANCE, u"wall top is %1 m away from the nearest roof vertex"_s.arg( worstSeamGap ).toUtf8().constData() );
 }
 
 QGSTEST_MAIN( TestQgsTessellator )
