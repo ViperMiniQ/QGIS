@@ -191,6 +191,67 @@ void QgsGeoPackageProviderConnection::deleteSpatialIndex( const QString &schema,
   executeGdalSqlPrivate( u"SELECT DisableSpatialIndex(%1, %2)"_s.arg( QgsSqliteUtils::quotedString( name ), QgsSqliteUtils::quotedString( geometryColumn ) ) );
 }
 
+void QgsGeoPackageProviderConnection::createIndex( const QString &schema, const QString &table, const QString &column, const QString &name, bool unique ) const
+{
+  Q_UNUSED( schema )
+  checkCapability( Qgis::DatabaseProviderConnectionCapability2::CreateIndex );
+
+  if ( name.isEmpty() || column.isEmpty() || table.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Column name, table or index name not specified while creating index" ) );
+  }
+
+  const QString uniqueKeyword = unique ? u"UNIQUE "_s : QString();
+
+  executeGdalSqlPrivate(
+    u"CREATE %1INDEX %2 ON %3 (%4)"_s.arg( uniqueKeyword, QgsSqliteUtils::quotedIdentifier( name ), QgsSqliteUtils::quotedIdentifier( table ), QgsSqliteUtils::quotedIdentifier( column ) )
+  );
+}
+
+QMap<QString, QStringList> QgsGeoPackageProviderConnection::tableIndexes( const QString &schema, const QString &table ) const
+{
+  Q_UNUSED( schema )
+  checkCapability( Qgis::DatabaseProviderConnectionCapability2::ListTableIndexes );
+
+  if ( table.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Table not specified while listing indexes" ) );
+  }
+
+  const QList<QVariantList> indexRows = executeGdalSqlPrivate( u"SELECT name, origin FROM pragma_index_list(%1)"_s.arg( QgsSqliteUtils::quotedString( table ) ) ).rows();
+
+  QMap<QString, QStringList> result;
+  for ( const QVariantList &row : indexRows )
+  {
+    if ( row.size() < 2 || row.at( 1 ).toString() == "pk"_L1 )
+      continue;
+    const QString indexName = row.at( 0 ).toString();
+    const QList<QVariantList> colRows = executeGdalSqlPrivate( u"SELECT name FROM pragma_index_info(%1) ORDER BY seqno"_s.arg( QgsSqliteUtils::quotedString( indexName ) ) ).rows();
+    QStringList cols;
+    for ( const QVariantList &c : colRows )
+    {
+      if ( !c.isEmpty() )
+        cols.append( c.first().toString() );
+    }
+    result.insert( indexName, cols );
+  }
+  return result;
+}
+
+void QgsGeoPackageProviderConnection::deleteIndex( const QString &schema, const QString &table, const QString &name ) const
+{
+  Q_UNUSED( schema )
+  Q_UNUSED( table )
+  checkCapability( Qgis::DatabaseProviderConnectionCapability2::DeleteIndex );
+
+  if ( name.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Index name not specified while deleting index" ) );
+  }
+
+  executeGdalSqlPrivate( u"DROP INDEX %1"_s.arg( QgsSqliteUtils::quotedIdentifier( name ) ) );
+}
+
 QList<QgsGeoPackageProviderConnection::TableProperty> QgsGeoPackageProviderConnection::tables( const QString &schema, const TableFlags &flags, QgsFeedback *feedback ) const
 {
   // List of GPKG quoted system and dummy tables names to be excluded from the tables listing
@@ -341,6 +402,8 @@ void QgsGeoPackageProviderConnection::setDefaultCapabilities()
   mCapabilities |= Capability::UpdateRelationship;
   mCapabilities |= Capability::DeleteRelationship;
 #endif
+
+  mCapabilities2 |= Qgis::DatabaseProviderConnectionCapability2::CreateIndex | Qgis::DatabaseProviderConnectionCapability2::ListTableIndexes | Qgis::DatabaseProviderConnectionCapability2::DeleteIndex;
 }
 
 QString QgsGeoPackageProviderConnection::primaryKeyColumnName( const QString &table ) const

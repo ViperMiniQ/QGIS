@@ -754,6 +754,7 @@ set(QGIS_GUI_SRCS
   qgsnewdatabasetablenamewidget.cpp
   qgsnewhttpconnection.cpp
   qgsnewmemorylayerdialog.cpp
+  qgsmanagetableindexesdialog.cpp
   qgsnewnamedialog.cpp
   qgsnewvectorlayerdialog.cpp
   qgsnewgeopackagelayerdialog.cpp
@@ -1030,6 +1031,7 @@ set(QGIS_GUI_HDRS
   qgsnewgeopackagelayerdialog.h
   qgsnewvectortabledialog.h
   qgsnewhttpconnection.h
+  qgsmanagetableindexesdialog.h
   qgsnewmemorylayerdialog.h
   qgsnewnamedialog.h
   qgsnewvectorlayerdialog.h

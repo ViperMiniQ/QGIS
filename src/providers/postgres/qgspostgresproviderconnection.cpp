@@ -134,7 +134,12 @@ void QgsPostgresProviderConnection::setDefaultCapabilities()
     Qgis::SqlLayerDefinitionCapability::UnstableFeatureIds,
   };
 
-  mCapabilities2 |= Qgis::DatabaseProviderConnectionCapability2::SetFieldComment | Qgis::DatabaseProviderConnectionCapability2::SetTableComment;
+  mCapabilities2 |= Qgis::DatabaseProviderConnectionCapability2::SetFieldComment
+                    | Qgis::DatabaseProviderConnectionCapability2::SetTableComment
+                    | Qgis::DatabaseProviderConnectionCapability2::CreateIndex
+                    | Qgis::DatabaseProviderConnectionCapability2::ListTableIndexes
+                    | Qgis::DatabaseProviderConnectionCapability2::DeleteIndex;
+
 
   // see https://www.postgresql.org/docs/current/ddl-system-columns.html
   mIllegalFieldNames = {
@@ -688,6 +693,84 @@ void QgsPostgresProviderConnection::createSpatialIndex( const QString &schema, c
       .arg( QgsPostgresConn::quotedIdentifier( indexName ), QgsPostgresConn::quotedIdentifier( schema ), QgsPostgresConn::quotedIdentifier( name ), QgsPostgresConn::quotedIdentifier( geometryColumnName ) ),
     false
   );
+}
+
+void QgsPostgresProviderConnection::createIndex( const QString &schema, const QString &table, const QString &column, const QString &name, bool unique ) const
+{
+  checkCapability( Qgis::DatabaseProviderConnectionCapability2::CreateIndex );
+
+  if ( name.isEmpty() || column.isEmpty() || table.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Column name, table or index name not specified while creating index" ) );
+  }
+
+  const QString qualifiedTable = schema.isEmpty() ? QgsPostgresConn::quotedIdentifier( table )
+                                                  : u"%1.%2"_s.arg( QgsPostgresConn::quotedIdentifier( schema ), QgsPostgresConn::quotedIdentifier( table ) );
+
+  const QString uniqueKeyword = unique ? u"UNIQUE "_s : QString();
+
+  executeSqlPrivate( u"CREATE %1INDEX %2 ON %3 (%4)"_s.arg( uniqueKeyword, QgsPostgresConn::quotedIdentifier( name ), qualifiedTable, QgsPostgresConn::quotedIdentifier( column ) ), false );
+}
+
+QMap<QString, QStringList> QgsPostgresProviderConnection::tableIndexes( const QString &schema, const QString &table ) const
+{
+  checkCapability( Qgis::DatabaseProviderConnectionCapability2::ListTableIndexes );
+
+  if ( table.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Table not specified while listing indexes" ) );
+  }
+
+  const QString schemaFilter = schema.isEmpty() ? u"n.nspname = current_schema()"_s : u"n.nspname = %1"_s.arg( QgsPostgresConn::quotedValue( schema ) );
+
+  const QList<QVariantList> rows = executeSqlPrivate(
+    u"SELECT i.relname, a.attname "
+    "FROM pg_class t "
+    "JOIN pg_namespace n ON n.oid = t.relnamespace "
+    "JOIN pg_index ix ON ix.indrelid = t.oid "
+    "JOIN pg_class i ON i.oid = ix.indexrelid "
+    "JOIN unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE "
+    "JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum "
+    "WHERE t.relkind IN ('r', 'm', 'p') "
+    "AND NOT ix.indisprimary "
+    "AND %1 "
+    "AND t.relname = %2 "
+    "ORDER BY i.relname, k.ord"_s.arg( schemaFilter, QgsPostgresConn::quotedValue( table ) ),
+    false
+  );
+
+  QMap<QString, QStringList> result;
+  for ( const QVariantList &row : rows )
+  {
+    if ( row.size() < 2 )
+      continue;
+    result[row.at( 0 ).toString()].append( row.at( 1 ).toString() );
+  }
+  return result;
+}
+
+void QgsPostgresProviderConnection::deleteIndex( const QString &schema, const QString &table, const QString &name ) const
+{
+  checkCapability( Qgis::DatabaseProviderConnectionCapability2::DeleteIndex );
+
+  if ( table.isEmpty() || name.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Table or index name not specified while deleting index" ) );
+  }
+
+  const QString schemaFilter = schema.isEmpty() ? u"schemaname = current_schema()"_s : u"schemaname = %1"_s.arg( QgsPostgresConn::quotedValue( schema ) );
+
+  const QList<QVariantList> rows
+    = executeSqlPrivate( u"SELECT 1 FROM pg_indexes WHERE %1 AND tablename = %2 AND indexname = %3"_s.arg( schemaFilter, QgsPostgresConn::quotedValue( table ), QgsPostgresConn::quotedValue( name ) ), false );
+
+  if ( rows.isEmpty() )
+  {
+    throw QgsProviderConnectionException( QObject::tr( "Index '%1' not found on table '%2'" ).arg( name, table ) );
+  }
+
+  const QString qualifiedIndex = schema.isEmpty() ? QgsPostgresConn::quotedIdentifier( name ) : u"%1.%2"_s.arg( QgsPostgresConn::quotedIdentifier( schema ), QgsPostgresConn::quotedIdentifier( name ) );
+
+  executeSqlPrivate( u"DROP INDEX %1"_s.arg( qualifiedIndex ), false );
 }
 
 bool QgsPostgresProviderConnection::spatialIndexExists( const QString &schema, const QString &name, const QString &geometryColumn ) const

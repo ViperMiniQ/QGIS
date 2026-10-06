@@ -50,6 +50,7 @@
 #include "qgsguiutils.h"
 #include "qgshistoryproviderregistry.h"
 #include "qgslayeritem.h"
+#include "qgsmanagetableindexesdialog.h"
 #include "qgsmessagebar.h"
 #include "qgsmessagelog.h"
 #include "qgsmessageoutput.h"
@@ -1540,6 +1541,41 @@ void QgsFieldItemGuiProvider::populateContextMenu( QgsDataItem *item, QMenu *men
           menu->addAction( setCommentAction );
         }
 
+        const bool isGeometryColumn = fieldsItem->tableProperty() && fieldsItem->tableProperty()->geometryColumn().compare( item->name(), Qt::CaseInsensitive ) == 0;
+        if ( conn && conn->capabilities2().testFlag( Qgis::DatabaseProviderConnectionCapability2::CreateIndex ) && !isGeometryColumn )
+        {
+          QAction *createIndexAction = new QAction( tr( "Create Index…" ), menu );
+          const QString itemName { item->name() };
+
+          connect( createIndexAction, &QAction::triggered, fieldsItem, [md, fieldsItem, itemName, context] {
+            const QString defaultName = u"idx_%1_%2"_s.arg( fieldsItem->tableName(), itemName );
+            bool ok = false;
+
+            const QString indexName = QInputDialog::getText( QgisApp::instance(), tr( "Create Index On %1" ).arg( itemName ), tr( "Index name" ), QLineEdit::Normal, defaultName, &ok ).trimmed();
+            if ( !ok || indexName.isEmpty() )
+              return;
+
+            std::unique_ptr<QgsAbstractDatabaseProviderConnection> conn2 { static_cast<QgsAbstractDatabaseProviderConnection *>( md->createConnection( fieldsItem->connectionUri(), {} ) ) };
+            if ( !conn2 )
+            {
+              notify( tr( "Create Index" ), tr( "Could not open connection to %1" ).arg( fieldsItem->connectionUri() ), context, Qgis::MessageLevel::Critical );
+              return;
+            }
+            try
+            {
+              conn2->createIndex( fieldsItem->schema(), fieldsItem->tableName(), itemName, indexName );
+              if ( context.messageBar() )
+                context.messageBar()->pushMessage( tr( "Index '%1' created on %2" ).arg( indexName, itemName ), Qgis::MessageLevel::Success );
+            }
+            catch ( const QgsProviderConnectionException &ex )
+            {
+              notify( tr( "Create Index" ), tr( "Failed to create index on field '%1': %2" ).arg( itemName, ex.what() ), context, Qgis::MessageLevel::Critical );
+            }
+          } );
+
+          menu->addAction( createIndexAction );
+        }
+
         if ( conn && conn->capabilities().testFlag( QgsAbstractDatabaseProviderConnection::Capability::DeleteField ) )
         {
           QAction *deleteFieldAction = new QAction( tr( "Delete Field…" ), menu );
@@ -2224,6 +2260,50 @@ void QgsDatabaseItemGuiProvider::populateContextMenu( QgsDataItem *item, QMenu *
           }
         } );
       }
+    }
+
+    if ( isTable
+         && conn
+         && conn->capabilities2().testFlag( Qgis::DatabaseProviderConnectionCapability2::CreateIndex )
+         && conn->capabilities2().testFlag( Qgis::DatabaseProviderConnectionCapability2::ListTableIndexes )
+         && conn->capabilities2().testFlag( Qgis::DatabaseProviderConnectionCapability2::DeleteIndex ) )
+    {
+      QAction *manageIndexesAction = new QAction( tr( "Manage Indexes…" ), menu );
+      QgsDataItemGuiProviderUtils::addToSubMenu( menu, manageIndexesAction, tr( "Manage" ) );
+
+      const QString connectionUri = conn->uri();
+      const QString providerKey = conn->providerKey();
+      const QString schemaName = item->parent()->name();
+      const QString tableName = item->name();
+
+      connect( manageIndexesAction, &QAction::triggered, manageIndexesAction, [providerKey, connectionUri, schemaName, tableName, context] {
+        QgsProviderMetadata *md { QgsProviderRegistry::instance()->providerMetadata( providerKey ) };
+        if ( !md )
+          return;
+
+        std::unique_ptr<QgsAbstractDatabaseProviderConnection> conn2( qgis::down_cast<QgsAbstractDatabaseProviderConnection *>( md->createConnection( connectionUri, QVariantMap() ) ) );
+        if ( !conn2 )
+        {
+          notify( tr( "Manage Indexes" ), tr( "Could not open connection to %1" ).arg( connectionUri ), context, Qgis::MessageLevel::Critical );
+          return;
+        }
+
+        QStringList fieldNames;
+        try
+        {
+          const QgsFields fields = conn2->fields( schemaName, tableName );
+          for ( const QgsField &f : fields )
+            fieldNames.append( f.name() );
+        }
+        catch ( const QgsProviderConnectionException &ex )
+        {
+          notify( tr( "Manage Indexes" ), tr( "Could not read fields for '%1': %2" ).arg( tableName, ex.what() ), context, Qgis::MessageLevel::Critical );
+          return;
+        }
+
+        QgsManageTableIndexesDialog dlg( conn2.get(), schemaName, tableName, fieldNames, QgisApp::instance() );
+        dlg.exec();
+      } );
     }
 
     if ( isTable && layerItem->layerCapabilities().testFlag( Qgis::LayerItemCapability::AddComments ) && conn->capabilities2().testFlag( Qgis::DatabaseProviderConnectionCapability2::SetTableComment ) )

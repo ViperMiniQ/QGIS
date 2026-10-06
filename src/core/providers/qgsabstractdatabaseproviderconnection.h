@@ -856,6 +856,36 @@ class CORE_EXPORT QgsAbstractDatabaseProviderConnection : public QgsAbstractProv
     virtual void deleteSpatialIndex( const QString &schema, const QString &name, const QString &geometryColumn ) const SIP_THROW( QgsProviderConnectionException );
 
     /**
+     * Creates a (non-spatial) index named \a name on \a column of the table \a schema.\a table
+     * (\a schema is ignored if not supported by the backend). If \a unique is TRUE
+     * the index enforces uniqueness; backends that do not support uniqueness
+     * constraints will ignore this flag.
+     *
+     * \throws QgsProviderConnectionException if any errors are encountered.
+     * \since QGIS 4.6
+     */
+    virtual void createIndex( const QString &schema, const QString &table, const QString &column, const QString &name, bool unique = false ) const SIP_THROW( QgsProviderConnectionException );
+
+    /**
+     * Returns a map of all (non-spatial, non-primary-key-backing) indexes defined on
+     * the table \a schema.\a table, keyed by index name, with ordered column names
+     * as values (\a schema is ignored if not supported by the backend).
+     *
+     * \throws QgsProviderConnectionException if any errors are encountered.
+     * \since QGIS 4.6
+     */
+    virtual QMap<QString, QStringList> tableIndexes( const QString &schema, const QString &table ) const SIP_THROW( QgsProviderConnectionException );
+
+    /**
+     * Deletes the (non-spatial) index named \a name on the table \a schema.\a table
+     * (\a schema is ignored if not supported by the backend).
+     *
+     * \throws QgsProviderConnectionException if any errors are encountered.
+     * \since QGIS 4.6
+     */
+    virtual void deleteIndex( const QString &schema, const QString &table, const QString &name ) const SIP_THROW( QgsProviderConnectionException );
+
+    /**
      * Returns information on the tables in the given schema.
      *
      * \param schema name of the schema (ignored if not supported by the backend)
