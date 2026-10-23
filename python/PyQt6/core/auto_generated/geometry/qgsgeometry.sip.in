@@ -2630,6 +2630,16 @@ The optional ``flags`` argument specifies flags controlling WKB export
 behavior (since QGIS 3.14).
 %End
 
+    QByteArray asEwkb( int srid, QgsAbstractGeometry::WkbFlags flags = QgsAbstractGeometry::WkbFlags() ) const;
+%Docstring
+Export the geometry to EWKB, following postgis implementation.
+
+If ``srid`` is greater than 0, it is embedded in the top level geometry.
+
+.. versionadded:: 4.6
+%End
+
+
     QString asWkt( int precision = 17 ) const;
 %Docstring
 Exports the geometry to WKT

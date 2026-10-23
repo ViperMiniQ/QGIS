@@ -2465,6 +2465,23 @@ class CORE_EXPORT QgsGeometry
     QByteArray asWkb( QgsAbstractGeometry::WkbFlags flags = QgsAbstractGeometry::WkbFlags() ) const;
 
     /**
+     * Export the geometry to EWKB, following postgis implementation.
+     *
+     * If \a srid is greater than 0, it is embedded in the top level geometry.
+     *
+     * \since QGIS 4.6
+     */
+    QByteArray asEwkb( int srid, QgsAbstractGeometry::WkbFlags flags = QgsAbstractGeometry::WkbFlags() ) const;
+
+#ifndef SIP_RUN
+    // EWKB byte order marker and type flags, as in liblwgeom
+    static constexpr char NDR = 1;
+    static constexpr quint32 WKBZOFFSET = 0x80000000;
+    static constexpr quint32 WKBMOFFSET = 0x40000000;
+    static constexpr quint32 WKBSRIDFLAG = 0x20000000;
+#endif
+
+    /**
      * Exports the geometry to WKT
      * \returns TRUE in case of success and FALSE else
      * \note precision parameter added in QGIS 2.4

@@ -25,7 +25,10 @@ email                : morb at ozemail dot com dot au
 #include "qgis.h"
 #include "qgsabstractgeometry.h"
 #include "qgscircle.h"
+#include "qgscompoundcurve.h"
 #include "qgscurve.h"
+#include "qgscurvepolygon.h"
+#include "qgsgeometrycollection.h"
 #include "qgsgeometryeditutils.h"
 #include "qgsgeometryfactory.h"
 #include "qgsgeometryutils.h"
@@ -54,6 +57,7 @@ email                : morb at ozemail dot com dot au
 #endif
 
 #include <QCache>
+#include <QtEndian>
 #include <QString>
 
 #include "moc_qgsgeometry.cpp"
@@ -3617,6 +3621,95 @@ int QgsGeometry::wkbSize( QgsAbstractGeometry::WkbFlags flags ) const
 QByteArray QgsGeometry::asWkb( QgsAbstractGeometry::WkbFlags flags ) const
 {
   return d->geometry ? d->geometry->asWkb( flags ) : QByteArray();
+}
+
+// https://github.com/postgis/postgis/blob/3.5.0/liblwgeom/lwin_wkb.c#L285
+static quint32 integerFromWkb( const char *buf, bool wkbLittleEndian )
+{
+  return wkbLittleEndian ? qFromLittleEndian<quint32>( buf ) : qFromBigEndian<quint32>( buf );
+}
+
+// https://github.com/postgis/postgis/blob/3.5.0/liblwgeom/lwout_wkb.c#L196-L239
+static void integerToWkb( char *buf, quint32 value, bool wkbLittleEndian )
+{
+  if ( wkbLittleEndian )
+    qToLittleEndian<quint32>( value, buf );
+  else
+    qToBigEndian<quint32>( value, buf );
+}
+
+static void convertWkbTypesToEwkb( QByteArray &wkb, qsizetype offset, const QgsAbstractGeometry *geometry, QgsAbstractGeometry::WkbFlags flags )
+{
+  const bool wkbLittleEndian = wkb.at( offset ) == QgsGeometry::NDR;
+  char *typePtr = wkb.data() + offset + 1;
+  const Qgis::WkbType type = static_cast<Qgis::WkbType>( integerFromWkb( typePtr, wkbLittleEndian ) );
+  const Qgis::WkbType flatType = QgsWkbTypes::flatType( type );
+
+  // ISO WKB
+  if ( flatType != Qgis::WkbType::NurbsCurve )
+  {
+    quint32 wkbType = static_cast<quint32>( flatType );
+    if ( QgsWkbTypes::hasZ( type ) )
+      wkbType |= QgsGeometry::WKBZOFFSET;
+
+    if ( QgsWkbTypes::hasM( type ) )
+      wkbType |= QgsGeometry::WKBMOFFSET;
+
+    integerToWkb( typePtr, wkbType, wkbLittleEndian );
+  }
+
+  // https://github.com/postgis/postgis/blob/3.5.0/liblwgeom/lwout_wkb.c#L648
+  qsizetype childOffset = offset + 9;
+  auto convertChild = [&]( const QgsAbstractGeometry *child ) {
+    if ( !child )
+      return;
+    convertWkbTypesToEwkb( wkb, childOffset, child, flags );
+    childOffset += child->wkbSize( flags );
+  };
+
+  if ( const QgsGeometryCollection *collection = qgsgeometry_cast<const QgsGeometryCollection *>( geometry ) )
+  {
+    for ( int i = 0; i < collection->numGeometries(); ++i )
+      convertChild( collection->geometryN( i ) );
+  }
+  else if ( const QgsPolyhedralSurface *surface = qgsgeometry_cast<const QgsPolyhedralSurface *>( geometry ) )
+  {
+    for ( int i = 0; i < surface->numPatches(); ++i )
+      convertChild( surface->patchN( i ) );
+  }
+  else if ( const QgsCompoundCurve *compoundCurve = qgsgeometry_cast<const QgsCompoundCurve *>( geometry ) )
+  {
+    for ( int i = 0; i < compoundCurve->nCurves(); ++i )
+      convertChild( compoundCurve->curveAt( i ) );
+  }
+  else if ( flatType == Qgis::WkbType::CurvePolygon )
+  {
+    const QgsCurvePolygon *curvePolygon = qgsgeometry_cast<const QgsCurvePolygon *>( geometry );
+    convertChild( curvePolygon->exteriorRing() );
+    for ( int i = 0; i < curvePolygon->numInteriorRings(); ++i )
+      convertChild( curvePolygon->interiorRing( i ) );
+  }
+}
+
+QByteArray QgsGeometry::asEwkb( int srid, QgsAbstractGeometry::WkbFlags flags ) const
+{
+  QByteArray wkb = asWkb( flags );
+  if ( wkb.size() < 5 )
+    return wkb;
+
+  convertWkbTypesToEwkb( wkb, 0, d->geometry.get(), flags );
+
+  // SRID only on the top level geometry, check: https://github.com/postgis/postgis/blob/3.5.0/liblwgeom/lwout_wkb.c#L64-L78
+  if ( srid > 0 )
+  {
+    const bool wkbLittleEndian = wkb.at( 0 ) == QgsGeometry::NDR;
+    char *typePtr = wkb.data() + 1;
+    integerToWkb( typePtr, integerFromWkb( typePtr, wkbLittleEndian ) | QgsGeometry::WKBSRIDFLAG, wkbLittleEndian );
+    char sridBytes[4];
+    integerToWkb( sridBytes, static_cast<quint32>( srid ), wkbLittleEndian );
+    wkb.insert( 5, sridBytes, 4 );
+  }
+  return wkb;
 }
 
 QVector<QgsGeometry> QgsGeometry::asGeometryCollection() const
