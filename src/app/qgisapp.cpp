@@ -5062,9 +5062,11 @@ void QgisApp::initLayerTreeView()
   connect( mFilterLegendToggleHideValidLayersAction, &QAction::toggled, this, [this]( bool hideValidLayers ) { layerTreeView()->setHideValidLayers( hideValidLayers ); } );
   filterLegendMenu->addAction( mFilterLegendToggleHideValidLayersAction );
 
+  QWidgetAction *filterAction = new QWidgetAction( this );
   mLegendExpressionFilterButton = new QgsLegendFilterButton( this );
   mLegendExpressionFilterButton->setToolTip( tr( "Filter legend by expression" ) );
   connect( mLegendExpressionFilterButton, &QAbstractButton::toggled, this, &QgisApp::toggleFilterLegendByExpression );
+  filterAction->setDefaultWidget( mLegendExpressionFilterButton );
 
   mActionStyleDock = new QAction( tr( "Layer Styling" ), this );
   mActionStyleDock->setCheckable( true );
@@ -5089,7 +5091,7 @@ void QgisApp::initLayerTreeView()
   toolbar->addAction( actionAddGroup );
   toolbar->addAction( actionVisibilityPresets );
   toolbar->addAction( mFilterLegendToolButtonAction );
-  toolbar->addWidget( mLegendExpressionFilterButton );
+  toolbar->addAction( filterAction );
   toolbar->addAction( actionExpandAll );
   toolbar->addAction( actionCollapseAll );
   toolbar->addAction( mActionRemoveLayer );
